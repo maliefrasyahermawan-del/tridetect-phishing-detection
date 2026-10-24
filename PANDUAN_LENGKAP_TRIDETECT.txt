@@ -1,0 +1,947 @@
+================================================================================
+         PANDUAN LENGKAP TRIDETECT — TRI-VECTOR PHISHING DETECTION SYSTEM
+         MBC Telkom University Cybersecurity Lab | Project #7
+================================================================================
+
+Dibuat oleh  : MBC Telkom University Lab
+Versi        : 1.0.0 (Phase 1)
+Tanggal      : 2025
+Bahasa       : Python 3.10+
+Status       : Phase 1 AKTIF (Web + Smishing) | Phase 2 ROADMAP (Vishing)
+
+================================================================================
+BAGIAN 1 — APA ITU TRIDETECT?
+================================================================================
+
+Tridetect adalah sistem deteksi phishing komprehensif yang dirancang untuk
+melindungi pengguna Indonesia dari TIGA jenis serangan phishing modern:
+
+  1. WEB PHISHING   → URL / website palsu yang meniru brand legitimate
+                      Contoh: "http://g0pay-verify.tk/login" berpura-pura jadi GoPay
+
+  2. SMISHING       → Phishing melalui SMS / WhatsApp
+                      Contoh: "AKUN BCA ANDA DIBEKUKAN, klik: bit.ly/xxx"
+
+  3. VISHING        → Phishing melalui telepon / voice call (Phase 2)
+                      Contoh: penipu mengaku dari bank minta kode OTP
+
+TUJUAN UTAMA:
+  - Deteksi otomatis URL berbahaya sebelum user klik
+  - Klasifikasi SMS phishing Indonesia dengan NLP berbahasa Indonesia
+  - Proteksi multi-layer terhadap pencurian identitas digital
+  - Dashboard monitoring untuk tim SOC / keamanan siber
+
+
+================================================================================
+BAGIAN 2 — FUNGSI SETIAP MODULE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ MODULE 1: WEB PHISHING DETECTOR                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ File Utama: tridetect/modules/web_phishing/                                 │
+│                                                                             │
+│ FUNGSI:                                                                     │
+│   Menganalisis URL/link apakah berbahaya berdasarkan 3 lapisan:             │
+│                                                                             │
+│   A. Lexical Feature Extraction (features.py)                               │
+│      - Ekstrak 25+ fitur dari URL:                                          │
+│        * Panjang URL (URL sangat panjang → mencurigakan)                    │
+│        * Penggunaan IP address (http://192.168.1.1/login → phishing)        │
+│        * TLD mencurigakan (.tk .ml .ga .cf .xyz → sering disalahgunakan)    │
+│        * URL shortener (bit.ly, tinyurl → menyembunyikan tujuan asli)       │
+│        * Tanda @ di URL (menipu browser)                                    │
+│        * Encoding hex (%61%62 → obfuskasi)                                  │
+│        * Subdomain berlebihan (a.b.c.bank.tk → impersonasi)                 │
+│        * Kata brand di URL (login, secure, verify, bca, gopay, dll)         │
+│                                                                             │
+│   B. Brand Typosquat Detection (brand_detector.py)                          │
+│      - Bandingkan domain dengan 33 brand Indonesia & global                 │
+│      - Gunakan algoritma Levenshtein Distance (ukur kesamaan teks)          │
+│      - Threshold: edit distance ≤ 2 = TYPOSQUAT                             │
+│        Contoh: "g0pay" vs "gopay" → distance 1 → TYPOSQUAT GoPay           │
+│        Contoh: "bcaa" vs "bca" → distance 1 → TYPOSQUAT BCA                │
+│      - Database brand: BCA, Mandiri, BNI, BRI, GoPay, OVO, Dana,           │
+│        Shopee, Tokopedia, Lazada, Telkomsel, PLN, dll (33 brand)            │
+│                                                                             │
+│   C. SSL Certificate Check (ssl_checker.py)                                 │
+│      - Cek validitas sertifikat HTTPS                                       │
+│      - Deteksi: sertifikat sangat baru (< 30 hari → phishing baru dibuat)   │
+│      - Deteksi: sertifikat kadaluarsa                                       │
+│      - Deteksi: issuer tidak dikenal                                        │
+│      - Timeout: 3 detik (tidak memblock request)                            │
+│                                                                             │
+│   FORMULA SKOR (Weighted Aggregate):                                        │
+│     Score = (Classifier × 0.50) + (Brand × 0.30) + (SSL × 0.20)           │
+│     ≥ 0.55 → MALICIOUS | 0.28–0.54 → SUSPICIOUS | < 0.28 → SAFE           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ MODULE 2: SMISHING DETECTOR                                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ File Utama: tridetect/modules/smishing/                                     │
+│                                                                             │
+│ FUNGSI:                                                                     │
+│   Menganalisis teks SMS/WhatsApp apakah mengandung phishing.                │
+│                                                                             │
+│   A. Text Preprocessing (preprocessor.py)                                  │
+│      - Normalisasi slang Indonesia (gw→saya, lo→kamu, gak→tidak, dll)      │
+│      - Ekstraksi URL dari teks SMS                                          │
+│      - Ekstraksi nominal uang (Rp 50.000.000, dst)                          │
+│      - Deteksi ALL CAPS ratio (> 30% huruf kapital → signal urgensi)        │
+│      - Deteksi bahasa (Indonesia / English / campuran)                      │
+│                                                                             │
+│   B. IndoBERT NLP Classifier (classifier.py)                               │
+│      - Model: indolem/indobert-base-uncased (pre-trained Bahasa Indonesia)  │
+│      - Fine-tuned dengan 5000 SMS sintetik Indonesia                        │
+│      - Output: probabilitas {benign, smishing}                              │
+│      - Fallback: rule-based jika model belum di-fine-tune                   │
+│                                                                             │
+│   C. Urgency Scorer (urgency_scorer.py)                                     │
+│      - Scoring 0-100 berdasarkan kata kunci:                                │
+│        URGENT_WORDS  : segera, sekarang, hari ini, cepat (+15/kata)         │
+│        THREAT_WORDS  : diblokir, dibekukan, ditutup, sanksi (+20/kata)      │
+│        REWARD_WORDS  : menang, hadiah, gratis, bonus, voucher (+12/kata)    │
+│        ACTION_WORDS  : klik, verifikasi, transfer, kirim (+8/kata)          │
+│        CAPS BONUS    : jika > 30% huruf kapital (+20 poin)                  │
+│      - Score ≥ 70: SANGAT MENCURIGAKAN                                      │
+│      - Score 40-69: ELEVATED                                                │
+│                                                                             │
+│   D. Sender Number Reputation (number_reputation.py)                       │
+│      - Cek nomor pengirim terhadap blocklist                                │
+│      - Deteksi pola: nomor internasional (+44, +1, dst → curigai)           │
+│      - Deteksi: short code mencurigakan                                     │
+│      - Blocklist: database nomor yang dilaporkan sebagai scammer            │
+│                                                                             │
+│   FORMULA SKOR (Weighted Aggregate):                                        │
+│     Score = (IndoBERT × 0.45) + (Urgency × 0.25) +                        │
+│             (URL Risk × 0.15) + (Number Rep × 0.15)                        │
+│     ≥ 0.60 → MALICIOUS | 0.30–0.59 → SUSPICIOUS | < 0.30 → SAFE           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ MODULE 3: VISHING DETECTOR (PHASE 2 — STUB)                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ File Utama: tridetect/modules/vishing/                                      │
+│                                                                             │
+│ STATUS: BELUM DIIMPLEMENTASI (mengembalikan HTTP 501)                       │
+│                                                                             │
+│ RENCANA PHASE 2:                                                            │
+│   1. Input audio: file WAV/MP3/M4A atau bytes                               │
+│   2. Resample audio ke 16kHz mono                                           │
+│   3. Speech-to-Text dengan OpenAI Whisper (multilingual ID/EN)              │
+│   4. Transcript → dikirim ke Smishing Classifier (reuse)                   │
+│   5. Output: {label, confidence, transcript, reasons}                      │
+│                                                                             │
+│ RENCANA PHASE 3:                                                            │
+│   - Voice clone / deepfake detection                                        │
+│   - Speaker diarization                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+BAGIAN 3 — ARSITEKTUR SISTEM
+================================================================================
+
+ARSITEKTUR UMUM:
+
+  USER / SOC TEAM
+       │
+       ▼
+  ┌────────────────────────────────────────────────────────────┐
+  │            API GATEWAY — FastAPI (port 8000)               │
+  │                                                            │
+  │   POST /v1/classify/web    ──→ Web Phishing Module         │
+  │   POST /v1/classify/sms    ──→ Smishing Module             │
+  │   POST /v1/classify/voice  ──→ HTTP 501 (Phase 2 stub)     │
+  │   GET  /health             ──→ Status semua module         │
+  │   GET  /docs               ──→ Swagger API docs            │
+  └────────────────┬───────────────────────┬───────────────────┘
+                   │                       │
+       ┌───────────▼──────────┐  ┌─────────▼──────────────────┐
+       │   WEB MODULE         │  │   SMISHING MODULE          │
+       │                      │  │                            │
+       │ 1. URL Parse         │  │ 1. Text Preprocess         │
+       │ 2. Feature Extract   │  │ 2. IndoBERT Classify       │
+       │    (25+ fitur)       │  │ 3. URL Extract             │
+       │ 3. RF/XGB Classify   │  │    → Web Module            │
+       │ 4. Brand Detect      │  │ 4. Urgency Score           │
+       │    (Levenshtein)     │  │ 5. Number Reputation       │
+       │ 5. SSL Check         │  │                            │
+       └──────────┬───────────┘  └──────────┬─────────────────┘
+                  └──────────────┬───────────┘
+                                 │
+                  ┌──────────────▼───────────────┐
+                  │        AGGREGATOR             │
+                  │                              │
+                  │  label: safe/suspicious/     │
+                  │          malicious           │
+                  │  confidence: 0.0 - 1.0       │
+                  │  reasons: [alasan deteksi]   │
+                  │  latency_ms: waktu proses    │
+                  └──────────────┬───────────────┘
+                                 │
+              ┌──────────────────┼─────────────────────┐
+              ▼                  ▼                     ▼
+       ┌─────────────┐   ┌──────────────┐   ┌─────────────────┐
+       │ SQLite DB   │   │  TTL Cache   │   │  Streamlit      │
+       │ (history)   │   │  (URL 1 jam) │   │  Dashboard      │
+       └─────────────┘   └──────────────┘   │  (port 8501)    │
+                                            └─────────────────┘
+
+ALUR DATA DETAIL:
+
+  [Web Classification]
+  Input: URL string
+    → Normalize URL
+    → Cache lookup (hash MD5, TTL 1 jam)
+    → Extract 25 fitur lexical
+    → Predict (RF+XGB ensemble ATAU rule-based jika model belum ada)
+    → Brand typosquat check (Levenshtein vs 123 brand aliases)
+    → SSL certificate check (timeout 3 detik)
+    → Weighted aggregate → label + confidence + reasons
+    → Simpan ke SQLite + cache
+    → Return JSON response
+
+  [SMS Classification]
+  Input: {text, sender_number, timestamp}
+    → Preprocess text (normalisasi, ekstrak URL/nominal)
+    → Ekstrak URL → kirim ke Web Module untuk tiap URL
+    → IndoBERT classify (atau rule-based fallback)
+    → Compute urgency score (keyword rules)
+    → Check sender number reputation
+    → Weighted aggregate → label + confidence + urgency + urls_found
+    → Simpan ke SQLite
+    → Return JSON response
+
+STRUKTUR FOLDER LENGKAP:
+
+  tridetect/                          ← Root project
+  ├── tridetect/                      ← Python package utama
+  │   ├── __init__.py                 ← Package init + versi
+  │   ├── cli.py                      ← CLI commands (click)
+  │   ├── gateway/                    ← FastAPI API gateway
+  │   │   ├── main.py                 ← App utama + lifespan
+  │   │   ├── schemas.py              ← Pydantic request/response models
+  │   │   └── routes/                 ← Endpoint handlers
+  │   │       ├── web.py              ← POST /v1/classify/web
+  │   │       ├── sms.py              ← POST /v1/classify/sms
+  │   │       └── voice.py            ← POST /v1/classify/voice (501 stub)
+  │   ├── modules/
+  │   │   ├── web_phishing/
+  │   │   │   ├── features.py         ← 25+ lexical URL features
+  │   │   │   ├── brand_detector.py   ← Levenshtein typosquat detection
+  │   │   │   ├── ssl_checker.py      ← SSL certificate validation
+  │   │   │   └── classifier.py       ← RF+XGB ensemble + rule fallback
+  │   │   ├── smishing/
+  │   │   │   ├── preprocessor.py     ← Text cleaning + URL/amount extract
+  │   │   │   ├── urgency_scorer.py   ← Keyword urgency scoring
+  │   │   │   ├── number_reputation.py← Sender reputation check
+  │   │   │   └── classifier.py       ← IndoBERT + aggregate logic
+  │   │   └── vishing/                ← STUB — Phase 2
+  │   │       ├── transcriber.py      ← Whisper STT (belum diimplementasi)
+  │   │       └── classifier.py       ← Vishing classifier (stub)
+  │   ├── shared/
+  │   │   ├── db.py                   ← SQLite connection + log_classification
+  │   │   ├── cache.py                ← In-memory TTL cache (pengganti Redis)
+  │   │   └── logger.py               ← Logging formatter
+  │   └── data/
+  │       ├── brands.json             ← 33 brand, 123 aliases
+  │       ├── number_blocklist.json   ← Nomor scammer yang diblokir
+  │       └── sms_synthetic.csv       ← 5000 SMS training data (generated)
+  ├── scripts/
+  │   ├── generate_synthetic_sms.py   ← Buat 5000 SMS sintetik
+  │   ├── seed_brands.py              ← Validasi brands.json
+  │   ├── train_smishing.py           ← Fine-tune IndoBERT
+  │   └── train_web.py                ← Train RF + XGBoost
+  ├── dashboard/
+  │   └── streamlit_app.py            ← Dashboard visual 3 tab
+  ├── tests/
+  │   ├── test_web_module.py          ← 12 unit tests web module
+  │   └── test_smishing_module.py     ← 11 unit tests smishing module
+  ├── docker/
+  │   ├── Dockerfile                  ← Multi-stage build
+  │   └── docker-compose.yml          ← App + PostgreSQL + Redis
+  ├── models_pretrained/              ← Folder model tersimpan (auto-created)
+  ├── pyproject.toml                  ← Package config + dependencies
+  ├── tridetect.db                    ← SQLite database (auto-created)
+  └── .gitignore                      ← Exclude models, db, env
+
+
+================================================================================
+BAGIAN 4 — CARA INSTALASI
+================================================================================
+
+PERSYARATAN:
+  - Python 3.10 atau lebih baru
+  - pip (package manager)
+  - Minimal 4 GB RAM (untuk IndoBERT)
+  - Koneksi internet (untuk download IndoBERT dari HuggingFace pertama kali)
+  - GPU (opsional, untuk training lebih cepat)
+
+LANGKAH 1 — Clone / Download Project
+  Jika menggunakan git:
+    git clone <url-repo> tridetect
+    cd tridetect
+
+  Jika download manual:
+    Extract zip ke folder kerja, masuk ke folder tersebut.
+
+LANGKAH 2 — Install Dependencies
+
+  CARA A (recommended, install sebagai package):
+    pip install -e .
+
+  CARA B (install dependencies satu per satu jika A gagal):
+    pip install fastapi uvicorn pydantic
+    pip install scikit-learn xgboost pandas numpy
+    pip install tldextract python-Levenshtein
+    pip install transformers torch
+    pip install click rich streamlit
+    pip install httpx aiofiles joblib
+
+  Untuk Vishing (Phase 2, opsional):
+    pip install openai-whisper soundfile librosa
+
+LANGKAH 3 — Generate Data Training
+  python scripts/generate_synthetic_sms.py
+
+  Output: tridetect/data/sms_synthetic.csv
+  - 2500 SMS phishing sintetik (bahasa Indonesia)
+  - 2500 SMS normal/benign sintetik
+
+LANGKAH 4 — Validasi Brand Database
+  python scripts/seed_brands.py
+
+  Output: Daftar 33 brand dengan total 123 alias yang dimuat.
+
+LANGKAH 5 — (Opsional) Training Model ML
+
+  Web Phishing Classifier:
+    python scripts/train_web.py
+    → Simpan: models_pretrained/web_rf/rf_model.pkl
+    → Simpan: models_pretrained/web_rf/xgb_model.pkl
+
+  Smishing IndoBERT Fine-tune (butuh 30+ menit, lebih cepat dengan GPU):
+    tridetect train smishing --epochs 3
+    → Simpan: models_pretrained/smishing_indobert/
+
+  CATATAN: Tanpa training, sistem otomatis pakai rule-based fallback
+  yang sudah cukup baik untuk demo dan testing.
+
+LANGKAH 6 — Jalankan Server API
+  tridetect serve --port 8000
+
+  Atau langsung dengan uvicorn:
+    uvicorn tridetect.gateway.main:app --host 0.0.0.0 --port 8000
+
+  Server aktif di: http://localhost:8000
+  API Docs (Swagger): http://localhost:8000/docs
+  API Docs (ReDoc): http://localhost:8000/redoc
+
+LANGKAH 7 — Jalankan Dashboard (tab baru / terminal baru)
+  tridetect dashboard
+
+  Dashboard aktif di: http://localhost:8501
+
+
+================================================================================
+BAGIAN 5 — CARA PENGGUNAAN
+================================================================================
+
+─────────────────────────────────────────────
+A. MENGGUNAKAN CLI (Command Line Interface)
+─────────────────────────────────────────────
+
+1. Cek URL phishing:
+   tridetect classify-web "http://g0pay-verify.tk/check"
+   tridetect classify-web "http://bca-login.ga/auth" --no-ssl
+   tridetect classify-web "https://tokopedia.com"
+
+2. Cek SMS phishing:
+   tridetect classify-sms "AKUN GOPAY ANDA AKAN DIBEKUKAN klik bit.ly/xxx"
+   tridetect classify-sms "Kode OTP BCA Anda: 123456. Jangan bagikan."
+   tridetect classify-sms "Selamat menang hadiah!" --sender "+447700900000"
+
+3. Jalankan server:
+   tridetect serve --port 8000
+   tridetect serve --port 8000 --reload   (mode development, auto-restart)
+
+4. Training model:
+   tridetect train web
+   tridetect train smishing --epochs 3 --batch-size 16
+
+5. Buka dashboard:
+   tridetect dashboard
+
+─────────────────────────────────────────────
+B. MENGGUNAKAN REST API (HTTP Requests)
+─────────────────────────────────────────────
+
+Server harus aktif dulu: tridetect serve --port 8000
+
+1. Cek kesehatan sistem:
+   GET http://localhost:8000/health
+
+   Respons:
+   {
+     "status": "ok",
+     "version": "1.0.0",
+     "modules": {
+       "web": "active",
+       "sms": "active",
+       "voice": "stub_phase2"
+     }
+   }
+
+2. Klasifikasi URL Web:
+   POST http://localhost:8000/v1/classify/web
+   Content-Type: application/json
+
+   Body:
+   {
+     "url": "http://g0pay-verify.tk/check",
+     "check_ssl": true,
+     "check_brand": true
+   }
+
+   Respons:
+   {
+     "label": "malicious",
+     "confidence": 0.685,
+     "reasons": [
+       "Rule-based classifier (no trained model)",
+       "Typosquat of brand 'GoPay': 'g0pay' ~= 'gopay' (edit distance 1)",
+       "Suspicious free TLD (often abused by phishers)",
+       "IP address used instead of domain name"
+     ],
+     "module": "web",
+     "latency_ms": 45,
+     "brand_match": "GoPay",
+     "ssl_valid": false
+   }
+
+3. Klasifikasi SMS:
+   POST http://localhost:8000/v1/classify/sms
+   Content-Type: application/json
+
+   Body:
+   {
+     "text": "AKUN GOPAY ANDA AKAN DIBEKUKAN. Verifikasi sekarang: bit.ly/xxx",
+     "sender_number": "+6281234567890",
+     "timestamp": "2025-01-15T10:00:00"
+   }
+
+   Respons:
+   {
+     "label": "suspicious",
+     "confidence": 0.383,
+     "reasons": [
+       "Contains 1 URL(s): bit.ly/xxx",
+       "Rule-based NLP (IndoBERT not loaded)",
+       "Very high urgency score (63/100) — high-pressure language detected",
+       "Excessive uppercase usage (100% of letters)"
+     ],
+     "module": "sms",
+     "latency_ms": 12,
+     "urls_found": ["bit.ly/xxx"],
+     "urgency_score": 63,
+     "sender_reputation": "mobile"
+   }
+
+4. Klasifikasi Voice (Phase 2 — belum aktif):
+   POST http://localhost:8000/v1/classify/voice
+
+   Respons: HTTP 501 Not Implemented
+   {
+     "detail": "Vishing module is not yet implemented (Phase 2)...",
+     "roadmap": {
+       "phase2": "Whisper STT + transcript classification",
+       "phase3": "Voice clone detection"
+     }
+   }
+
+─────────────────────────────────────────────
+C. MENGGUNAKAN CURL (Terminal Testing)
+─────────────────────────────────────────────
+
+Cek URL phishing:
+  curl -X POST http://localhost:8000/v1/classify/web \
+    -H "Content-Type: application/json" \
+    -d "{\"url\": \"http://bca-mobile.ga/login\", \"check_ssl\": false}"
+
+Cek SMS phishing:
+  curl -X POST http://localhost:8000/v1/classify/sms \
+    -H "Content-Type: application/json" \
+    -d "{\"text\": \"Selamat Anda memenangkan hadiah Rp 50.000.000\"}"
+
+Cek health:
+  curl http://localhost:8000/health
+
+─────────────────────────────────────────────
+D. MENGGUNAKAN STREAMLIT DASHBOARD
+─────────────────────────────────────────────
+
+Buka: http://localhost:8501
+
+Tab 1 — Web Phishing:
+  - Ketik URL di kolom input
+  - Centang/uncentang "Check SSL" dan "Check brand typosquat"
+  - Klik "Analyse URL"
+  - Hasil: label (hijau/kuning/merah) + confidence + alasan deteksi
+
+Tab 2 — SMS / Smishing:
+  - Paste teks SMS di text area
+  - (Opsional) isi nomor pengirim
+  - Klik "Analyse Message"
+  - Hasil: label + urgency score + URL yang terdeteksi
+
+Tab 3 — Statistics:
+  - Total klasifikasi yang pernah dilakukan
+  - Grafik distribusi label (safe/suspicious/malicious)
+  - Tabel riwayat klasifikasi terbaru
+  - Distribusi per module (web vs sms)
+
+Tab 4 — About:
+  - Penjelasan arsitektur
+  - Roadmap Phase 2 dan 3
+
+─────────────────────────────────────────────
+E. MENGGUNAKAN DOCKER (Lab Deployment)
+─────────────────────────────────────────────
+
+Build dan jalankan semua service:
+  cd docker
+  docker compose up --build
+
+Service yang aktif:
+  - API        : http://localhost:8000
+  - Dashboard  : http://localhost:8501
+  - PostgreSQL : port 5432 (untuk production)
+  - Redis      : port 6379 (untuk URL cache)
+
+Hentikan semua service:
+  docker compose down
+
+
+================================================================================
+BAGIAN 6 — CARA MEMBACA OUTPUT / HASIL DETEKSI
+================================================================================
+
+LABEL HASIL:
+
+  safe        → URL/SMS aman, tidak terindikasi phishing
+                Tindakan: Tidak perlu khawatir, bisa dilanjutkan
+
+  suspicious  → Mencurigakan, perlu verifikasi lebih lanjut
+                Tindakan: Jangan klik link, verifikasi ke sumber resmi brand
+
+  malicious   → Sangat berbahaya, dipastikan atau sangat kemungkinan phishing
+                Tindakan: Blokir URL/nomor ini, laporkan ke pihak berwajib
+
+CONFIDENCE (Tingkat Keyakinan):
+  0.0 - 0.27   → Safe
+  0.28 - 0.54  → Suspicious
+  0.55 - 1.0   → Malicious
+
+  Semakin tinggi confidence → semakin yakin sistem dengan labelnya
+  Contoh: confidence 0.85 malicious = SANGAT YAKIN phishing
+
+URGENCY SCORE (khusus SMS):
+  0  - 20   → Tidak ada urgensi mencurigakan (normal)
+  21 - 40   → Sedikit urgensi (masih bisa normal)
+  41 - 70   → Elevated urgency (perlu waspada)
+  71 - 100  → Sangat mendesak (pola phishing klasik)
+
+REASONS (Alasan Deteksi):
+  Setiap response berisi array "reasons" yang menjelaskan MENGAPA
+  sistem menilai URL/SMS tersebut berbahaya. Contoh alasan:
+
+  Web:
+    - "Typosquat of brand 'BCA': 'bcaa' ~= 'bca' (edit distance 1)"
+    - "Suspicious free TLD (often abused by phishers)"
+    - "IP address used instead of domain name"
+    - "URL shortener detected (hides destination)"
+    - "SSL: Certificate very new (15 days old)"
+
+  SMS:
+    - "Very high urgency score (85/100) — high-pressure language detected"
+    - "Contains 2 URL(s): bit.ly/xxx, g0pay.tk/check"
+    - "Excessive uppercase usage (78% of letters)"
+    - "Monetary amounts detected: Rp 50.000.000"
+    - "Sender number +447700900000 is international (suspicious for Indonesian banking SMS)"
+
+
+================================================================================
+BAGIAN 7 — CARA TRAINING MODEL (OPSIONAL, UNTUK AKURASI LEBIH BAIK)
+================================================================================
+
+TRAINING WEB PHISHING CLASSIFIER:
+
+  1. Jalankan script training:
+     python scripts/train_web.py
+
+  2. Yang terjadi:
+     - Generate 4000 URL sintetik (2000 phishing, 2000 benign)
+     - Ekstrak 25 fitur per URL
+     - Train Random Forest (100 estimators)
+     - Train XGBoost (100 estimators)
+     - Evaluasi dengan classification report
+     - Simpan model ke models_pretrained/web_rf/
+
+  3. Setelah training, classifier otomatis load model yang sudah dilatih.
+
+TRAINING SMISHING CLASSIFIER (IndoBERT Fine-tune):
+
+  1. Pastikan sms_synthetic.csv sudah ada:
+     python scripts/generate_synthetic_sms.py
+
+  2. Jalankan fine-tuning:
+     tridetect train smishing --epochs 3 --batch-size 16
+
+     Atau langsung:
+     python scripts/train_smishing.py --epochs 3
+
+  3. Perkiraan waktu:
+     - CPU saja          : 2-4 jam per epoch
+     - GPU (CUDA)        : 5-15 menit per epoch
+     - Total 3 epochs GPU: ~30-45 menit
+
+  4. Model tersimpan di: models_pretrained/smishing_indobert/
+     Saat server restart, model ini otomatis diload.
+
+CATATAN TANPA TRAINING:
+  - Web module: menggunakan rule-based scoring (25+ fitur heuristik)
+    Sudah cukup baik untuk deteksi pola umum phishing
+  - SMS module: menggunakan rule-based keyword matching
+    + IndoBERT base (tanpa fine-tune, akurasi lebih rendah)
+
+
+================================================================================
+BAGIAN 8 — MENJALANKAN UNIT TESTS
+================================================================================
+
+Install test dependencies dulu:
+  pip install pytest pytest-asyncio httpx
+
+Jalankan semua tests:
+  pytest tests/ -v
+
+Jalankan test spesifik:
+  pytest tests/test_web_module.py -v
+  pytest tests/test_smishing_module.py -v
+
+Test coverage (opsional):
+  pip install pytest-cov
+  pytest tests/ --cov=tridetect --cov-report=html
+  → Buka htmlcov/index.html di browser
+
+Tests yang ada:
+  test_web_module.py:
+    - TestFeatureExtraction: 10 test kasus ekstraksi fitur URL
+    - TestBrandDetector   : 3 test deteksi typosquat brand
+    - TestSSLChecker      : 2 test SSL checker
+    - TestWebClassifier   : 4 test klasifikasi URL end-to-end
+
+  test_smishing_module.py:
+    - TestPreprocessor    : 6 test preprocessing teks SMS
+    - TestUrgencyScorer   : 5 test scoring urgensi
+    - TestNumberReputation: 4 test reputasi nomor
+    - TestSmishingClassifier: 4 test klasifikasi SMS end-to-end
+
+
+================================================================================
+BAGIAN 9 — CONTOH SKENARIO PENGGUNAAN DI LAB
+================================================================================
+
+SKENARIO 1 — Demo Phishing Detection:
+
+  Langkah:
+  1. Buka terminal: tridetect serve --port 8000
+  2. Buka terminal baru: tridetect dashboard
+  3. Buka browser: http://localhost:8501
+  4. Di tab "Web Phishing", masukkan URL:
+     - "http://g0pay-verify.tk/check"      → harus MALICIOUS
+     - "https://www.tokopedia.com"         → harus SAFE
+     - "http://bca-mobile.ga/login"        → harus MALICIOUS
+  5. Di tab "SMS/Smishing", masukkan:
+     - "AKUN GOPAY ANDA AKAN DIBEKUKAN. Verifikasi: bit.ly/xxx"  → harus SUSPICIOUS/MALICIOUS
+     - "Kode OTP BCA: 123456. Jangan bagikan."                   → harus SAFE
+
+SKENARIO 2 — Integrasi dengan sistem lain (via API):
+
+  // Python client contoh
+  import httpx
+
+  client = httpx.Client(base_url="http://localhost:8000")
+
+  # Cek URL sebelum user klik
+  response = client.post("/v1/classify/web", json={
+      "url": url_yang_akan_diklik,
+      "check_ssl": True,
+      "check_brand": True
+  })
+  result = response.json()
+
+  if result["label"] == "malicious":
+      print(f"BAHAYA! URL ini phishing: {result['reasons']}")
+      # Blokir / warning user
+
+SKENARIO 3 — Analisis massal SMS laporan:
+
+  1. Kumpulkan laporan SMS ke dalam file CSV
+  2. Buat script Python yang membaca CSV dan post ke /v1/classify/sms
+  3. Simpan hasil ke database
+  4. Lihat statistik di dashboard Tab Statistics
+
+
+================================================================================
+BAGIAN 10 — TROUBLESHOOTING (PENANGANAN MASALAH)
+================================================================================
+
+MASALAH 1: "ModuleNotFoundError: No module named 'tldextract'"
+SOLUSI   : pip install tldextract python-Levenshtein transformers torch
+
+MASALAH 2: IndoBERT loading sangat lambat
+SOLUSI   : Normal di CPU, bisa 20-30 detik pertama kali.
+           Setelah load pertama, sudah ter-cache di memory.
+           Jika butuh lebih cepat, pakai GPU atau gunakan rule-based saja.
+
+MASALAH 3: "No connection could be made" saat test API
+SOLUSI   : Tunggu server benar-benar aktif dulu.
+           Cek log server: ada pesan "Application startup complete"
+           IndoBERT perlu waktu ~20 detik untuk load.
+
+MASALAH 4: UnicodeEncodeError di Windows
+SOLUSI   : Jalankan python dengan encoding UTF-8:
+           set PYTHONIOENCODING=utf-8
+           python script_anda.py
+
+           Atau tambahkan di awal script:
+           import sys; sys.stdout.reconfigure(encoding='utf-8')
+
+MASALAH 5: "Cannot import 'setuptools.backends.legacy'"
+SOLUSI   : Sudah diperbaiki di pyproject.toml.
+           Gunakan: build-backend = "setuptools.build_meta"
+
+MASALAH 6: Conflict FastAPI vs Streamlit (starlette version)
+SOLUSI   : Gunakan FastAPI >= 0.115:
+           pip install "fastapi>=0.115"
+
+MASALAH 7: Model tidak akurat (banyak false positive/negative)
+SOLUSI   : Lakukan fine-tuning dengan data nyata:
+           1. Kumpulkan SMS phishing Indonesia yang real
+           2. Tambahkan ke format CSV (text, label, source)
+           3. Jalankan: tridetect train smishing --epochs 5
+           4. Restart server
+
+MASALAH 8: Port 8000 sudah dipakai
+SOLUSI   : tridetect serve --port 8001
+           Atau ganti port sesuai kebutuhan.
+
+
+================================================================================
+BAGIAN 11 — DEPENDENCY LENGKAP
+================================================================================
+
+Core API:
+  fastapi>=0.115          FastAPI web framework
+  uvicorn[standard]>=0.27 ASGI server untuk FastAPI
+  pydantic>=2.5           Data validation dan serialization
+
+Machine Learning (Web):
+  scikit-learn>=1.4       Random Forest classifier
+  xgboost>=2.0            XGBoost classifier
+  pandas>=2.0             Data manipulation
+  numpy>=1.24             Numerical computing
+  joblib>=1.3             Model serialization
+
+NLP (Smishing):
+  transformers>=4.38      HuggingFace transformers (IndoBERT)
+  torch>=2.1              PyTorch deep learning framework
+
+URL Analysis:
+  tldextract>=5.0         Extract domain/subdomain/TLD dari URL
+  python-Levenshtein>=0.25 Edit distance untuk typosquat detection
+
+CLI & UI:
+  click>=8.1              CLI framework
+  rich>=13.0              Terminal formatting yang cantik
+  streamlit>=1.30         Dashboard web interaktif
+
+Utilities:
+  httpx>=0.27             Async HTTP client (untuk SSL check)
+  aiofiles>=23.0          Async file I/O
+  python-dotenv>=1.0      Environment variables
+
+Development:
+  pytest>=7.0             Testing framework
+  pytest-asyncio>=0.23    Async test support
+
+Phase 2 (Opsional, Vishing):
+  openai-whisper          Speech-to-text
+  soundfile               Audio file I/O
+  librosa                 Audio processing
+
+
+================================================================================
+BAGIAN 12 — FORMAT API LENGKAP
+================================================================================
+
+BASE URL  : http://localhost:8000
+API DOCS  : http://localhost:8000/docs     (Swagger UI interaktif)
+REDOC     : http://localhost:8000/redoc    (Documentation alternatif)
+
+ENDPOINTS:
+
+  GET  /                          → Info dasar API
+  GET  /health                    → Status semua module
+  GET  /docs                      → Swagger UI (bisa test langsung di browser)
+  POST /v1/classify/web           → Klasifikasi URL
+  POST /v1/classify/sms           → Klasifikasi SMS/WhatsApp
+  POST /v1/classify/voice         → Klasifikasi voice (501 stub)
+
+REQUEST SCHEMA — Web:
+  {
+    "url"         : string   (required) — URL yang akan diklasifikasi
+    "check_ssl"   : boolean  (default: true) — Cek SSL certificate
+    "check_brand" : boolean  (default: true) — Cek brand typosquat
+  }
+
+REQUEST SCHEMA — SMS:
+  {
+    "text"           : string   (required, 5-2000 char) — Teks SMS
+    "sender_number"  : string   (optional) — Nomor pengirim (+62...)
+    "timestamp"      : datetime (optional) — Waktu SMS diterima
+  }
+
+RESPONSE SCHEMA (semua module):
+  {
+    "label"      : "safe" | "suspicious" | "malicious"
+    "confidence" : float (0.0 - 1.0)
+    "reasons"    : array of string
+    "module"     : "web" | "sms" | "voice"
+    "latency_ms" : integer (waktu proses dalam milidetik)
+
+    // Web-specific:
+    "brand_match" : string | null (nama brand yang di-typosquat)
+    "ssl_valid"   : boolean | null
+
+    // SMS-specific:
+    "urls_found"       : array of string
+    "urgency_score"    : integer (0-100)
+    "sender_reputation": string
+  }
+
+
+================================================================================
+BAGIAN 13 — ROADMAP PENGEMBANGAN SELANJUTNYA
+================================================================================
+
+PHASE 1 (SELESAI) — Web + Smishing
+  [x] FastAPI gateway dengan 3 endpoint
+  [x] Web phishing: 25 fitur + brand detect + SSL check
+  [x] Smishing: IndoBERT + urgency scorer + number reputation
+  [x] Streamlit dashboard 4 tab
+  [x] SQLite case history
+  [x] TTL URL cache
+  [x] CLI dengan click + rich
+  [x] Docker compose
+  [x] Unit tests (23 test cases)
+  [x] 5000 synthetic SMS dataset
+  [x] 33 brands / 123 aliases database
+
+PHASE 2 (Week 5-7) — Vishing
+  [ ] Audio input handling (WAV/MP3/M4A)
+  [ ] OpenAI Whisper STT integration
+  [ ] Transcript → Smishing classifier pipeline
+  [ ] POST /v1/classify/voice endpoint aktif
+
+PHASE 3 (Week 8-10) — Browser Extension
+  [ ] Chrome Extension Manifest V3
+  [ ] Real-time URL scanning saat browsing
+  [ ] Warning popup untuk URL berbahaya
+  [ ] Badge merah/hijau di toolbar
+
+PHASE 4 (Week 11-12) — Mobile App
+  [ ] Flutter companion app
+  [ ] SMS forward ke Tridetect API
+  [ ] Push notification untuk hasil deteksi
+  [ ] Integrasi Telegram bot
+
+PHASE 5 (Week 13+) — Voice Clone Detection
+  [ ] Deepfake/voice clone detection
+  [ ] Speaker diarization
+  [ ] Real-time audio stream analysis
+
+
+================================================================================
+BAGIAN 14 — CATATAN ETIS
+================================================================================
+
+1. PENGGUNAAN DATASET
+   - Semua data training adalah SINTETIK — tidak menggunakan data SMS pengguna nyata
+   - Data tidak dikumpulkan dari pengguna tanpa izin
+   - Blocklist nomor telepon bersumber dari laporan komunitas publik
+
+2. FALSE POSITIVE
+   - Promo agresif dari brand legitimate mungkin terdeteksi sebagai "suspicious"
+   - Selalu verifikasi ke sumber resmi jika ragu dengan hasilnya
+   - Tidak boleh digunakan sebagai satu-satunya dasar tindakan blokir
+
+3. PRIVASI
+   - Input SMS tidak disimpan dalam bentuk teks biasa di database
+   - Hanya hash fingerprint (MD5) yang disimpan untuk deduplication
+   - Tidak ada logging konten pribadi
+
+4. KEAMANAN
+   - Tool ini HANYA untuk tujuan defensif dan penelitian keamanan siber
+   - Dilarang digunakan untuk tujuan ofensif atau menyerang sistem pihak lain
+   - Digunakan dalam konteks: penelitian akademik, lab keamanan, SOC team
+
+5. DISCLAIMER
+   - Akurasi sistem bergantung pada kualitas data training
+   - Tidak ada sistem yang 100% akurat — selalu gunakan penilaian manusia
+   - Developer tidak bertanggung jawab atas kerugian akibat false positive/negative
+
+
+================================================================================
+RINGKASAN CEPAT — CHEAT SHEET
+================================================================================
+
+  # Install
+  pip install -e .
+
+  # Setup data
+  python scripts/generate_synthetic_sms.py
+  python scripts/seed_brands.py
+
+  # Jalankan API
+  tridetect serve --port 8000
+
+  # Jalankan Dashboard
+  tridetect dashboard
+
+  # Test via CLI
+  tridetect classify-web "http://g0pay-verify.tk"
+  tridetect classify-sms "AKUN ANDA DIBEKUKAN klik bit.ly/xxx"
+
+  # Test via curl (setelah server aktif)
+  curl -X POST http://localhost:8000/v1/classify/web \
+    -H "Content-Type: application/json" \
+    -d "{\"url\": \"http://bcaa.tk/login\", \"check_ssl\": false}"
+
+  # Training model (opsional)
+  python scripts/train_web.py
+  tridetect train smishing --epochs 3
+
+  # Run tests
+  pytest tests/ -v
+
+  # Docker deployment
+  cd docker && docker compose up --build
+
+================================================================================
+                    TRIDETECT v1.0.0 — MBC Telkom University
+                    "Protecting Indonesia's Digital Identity"
+================================================================================

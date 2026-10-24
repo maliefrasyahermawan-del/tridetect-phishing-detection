@@ -1,0 +1,21 @@
+{
+  "_comment": "Known smishing/scam numbers reported in Indonesia. Update regularly via community reports.",
+  "blocked_numbers": [
+    "+442045771234",
+    "+12025551234",
+    "+447700900123",
+    "+85212345678",
+    "+601112345678",
+    "0811999888",
+    "0822333444",
+    "087712345678",
+    "+6281234567890"
+  ],
+  "suspicious_patterns": [
+    "\\+44",
+    "\\+1",
+    "\\+852",
+    "\\+60"
+  ],
+  "safe_shortcodes": ["14045", "1500888", "14000", "021500"]
+}

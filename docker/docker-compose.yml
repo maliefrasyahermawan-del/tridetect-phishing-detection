@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  tridetect:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: tridetect-api
+    ports:
+      - "8000:8000"
+    environment:
+      - TRIDETECT_ENV=production
+      - DATABASE_URL=postgresql://tridetect:tridetect@db:5432/tridetect
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - models_vol:/app/models_pretrained
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: tridetect-dashboard
+    command: ["streamlit", "run", "dashboard/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      - TRIDETECT_ENV=production
+    depends_on:
+      - tridetect
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: tridetect-db
+    environment:
+      POSTGRES_USER: tridetect
+      POSTGRES_PASSWORD: tridetect
+      POSTGRES_DB: tridetect
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tridetect"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: tridetect-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  models_vol:
